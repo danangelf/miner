@@ -1,0 +1,48 @@
+#!/bin/bash
+exec 2>/dev/null
+
+# Total
+hashrate_total=$(tac /dev/shm/miner.log | grep -E "MH/s" | grep "Total:" | head -n 1 | cut -c 52- | cut -f1 -d"|" | sed 's/[^0-9]*//g' | cut -f1 -d"." |sed 's/$/000000/' | xargs)
+
+# Pool
+pool=$(tac /dev/shm/miner.log | grep URL: | cut -c 32- | xargs | sed 's/[^a-Z0-9:-.-]*//g' | rev | cut -c 2- | rev)
+if [[ -z "$pool" ]]; then
+  pool=$(tac /dev/shm/miner.log | grep "difficulty" | head -n 1 | sed 's/[^a-Z0-9:-. []-]*//g' | awk -F']' '{print $2}' | sed 's/[^a-Z0-9:-.-]*//g' | cut -c 4- | xargs)
+fi
+
+# Total Shares
+shares_accepted="0"
+shares_rejected="0"
+
+# GPU DATA
+declare -A devices
+
+for device in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+do
+  name="gpu$device"
+  gpu_api=$(echo "$API" | jq ".devices[$device]")
+
+  hashrate=$(tac /dev/shm/miner.log | grep "|$device|" | grep -vE "MHz" | head -n 1 | sed 's/[^0-9.|]*//g' | awk -F'|' '{print $4}' | cut -f1 -d"." | sed 's/$/000000/' | xargs)
+  accepted=$(tac /dev/shm/miner.log | grep "|$device|" | grep -vE "MHz" | head -n 1 | sed 's/[^0-9.|]*//g' | awk -F'|' '{print $6}' | cut -f1 -d"." | xargs)
+  rejected=$(tac /dev/shm/miner.log | grep "|$device|" | grep -vE "MHz" | head -n 1 | sed 's/[^0-9.|]*//g' | awk -F'|' '{print $7}' | cut -f1 -d"." | xargs)
+  invalid=$(tac /dev/shm/miner.log | grep "|$device|" | grep -vE "MHz" | head -n 1 | sed 's/[^0-9.|]*//g' | awk -F'|' '{print $8}' | cut -f1 -d"." | xargs)
+
+  # If exists
+  if [[ "$hashrate" != "" ]]; then
+    devices[$name]="$hashrate/$accepted/$rejected"
+    # Add shares
+    shares_accepted=$((shares_accepted + accepted))
+    shares_rejected=$((shares_rejected + rejected))
+    shares_rejected=$((shares_rejected + invalid))
+  fi
+
+done
+
+hashrate_gpu=",gpu0:${devices["gpu0"]},gpu1:${devices["gpu1"]},gpu2:${devices["gpu2"]},gpu3:${devices["gpu3"]},gpu4:${devices["gpu4"]},gpu5:${devices["gpu5"]},gpu6:${devices["gpu6"]},gpu7:${devices["gpu7"]},gpu8:${devices["gpu8"]},gpu9:${devices["gpu9"]},gpu10:${devices["gpu10"]},gpu11:${devices["gpu11"]},gpu12:${devices["gpu12"]},gpu13:${devices["gpu13"]},gpu14:${devices["gpu14"]},gpu15:${devices["gpu15"]}"
+
+# Uptime in seconds
+uptime_in_sec=$(ps -p $(pidof rigel | cut -f1 -d" ") -o etimes | tac | head -n1 | xargs)
+if [ -z "$uptime_in_sec" ]; then
+  uptime_in_sec="0"
+fi
+echo "hashrate_total:$hashrate_total,uptime:$uptime_in_sec,pool:$pool,shares_rejected:$shares_rejected,shares_accepted:$shares_accepted$hashrate_gpu"
